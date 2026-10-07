@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Leave Now</title>
+  <meta name="description" content="Live STIB departures and when to leave home">
+  <meta name="theme-color" content="#0f151b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Leave Now">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Ambient colour field: Liquid Glass needs something behind it to refract. -->
+  <div class="ambient" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <!-- Refraction lens for floating controls (applied only where backdrop-filter: url() works). -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="lens" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="7" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="2" result="soft"/>
+      <feDisplacementMap in="SourceGraphic" in2="soft" scale="38" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </svg>
+  <main id="home">
+    <header class="top">
+      <div class="top-text">
+        <div class="eyebrow"><span class="live-dot" id="liveDot"></span><span id="status">Connecting…</span></div>
+        <h1 class="stop-name" id="stopName">No stop set</h1>
+        <div class="meta" id="subline"></div>
+      </div>
+    </header>
+
+    <div class="favs-row" id="favsRow" hidden>
+      <nav class="favs" id="favs" aria-label="Favourite lines"></nav>
+      <!-- Kept outside the scrolling list so it's always reachable, however many favourites there are. -->
+      <button type="button" class="fav fav-add" id="addFav" aria-label="Add a line setup">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+
+    <div id="swipeArea">
+    <section class="hero glass lit" id="hero">
+      <div class="ring">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="ring-bg" cx="60" cy="60" r="52"/>
+          <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="52"/>
+        </svg>
+        <div class="ring-center">
+          <div class="hero-big" id="heroBig">—</div>
+          <div class="hero-unit" id="heroUnit"></div>
+        </div>
+      </div>
+      <div class="hero-text">
+        <div class="hero-label" id="heroLabel">Set up your stop</div>
+        <div class="hero-title" id="heroTitle">Choose a station</div>
+        <div class="hero-detail" id="heroDetail">Tap the settings button to begin</div>
+      </div>
+    </section>
+
+    <div class="section-head">
+      <h2>Next departures</h2>
+    </div>
+    <ul class="deps glass" id="deps"></ul>
+
+    <section class="lm-wrap glass" id="lineMap" hidden></section>
+    </div>
+  </main>
+
+  <nav class="dock glass lit" aria-label="Actions">
+    <button class="dock-btn" id="refresh" type="button">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+      <span>Refresh</span>
+    </button>
+    <button class="dock-btn" id="toMap" type="button">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10"/><path d="M11 5h9M11 12h9M11 19h9"/><circle cx="6" cy="12" r="1.2"/></svg>
+      <span>Line</span>
+    </button>
+    <button class="dock-btn" id="openSettings" type="button">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <dialog id="settings" class="glass">
+    <form method="dialog" id="settingsForm">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-head">
+        <h2 id="settingsTitle" tabindex="-1" autofocus>Edit favourite</h2>
+        <button type="button" class="sheet-new" id="newFromSheet">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          New line setup
+        </button>
+      </div>
+
+      <label class="field">
+        <span>Name (optional)</span>
+        <input id="favName" type="text" maxlength="24" autocomplete="off" placeholder="e.g. Work, Gym, Mum's">
+      </label>
+
+      <label class="field">
+        <span>Stop</span>
+        <div class="row">
+          <input id="stopQuery" type="search" placeholder="e.g. Merode, Flagey…" autocomplete="off">
+          <button type="button" id="searchBtn">Search</button>
+        </div>
+      </label>
+      <div id="stopResults" class="results"></div>
+      <div id="platforms" class="platforms"></div>
+
+      <label class="field">
+        <span>Walk from home to this stop (min)</span>
+        <input id="walk" type="number" min="0" max="60" inputmode="numeric">
+      </label>
+
+      <button type="button" class="delete-row" id="deleteFav">Delete this line setup</button>
+
+      <h3 class="sheet-sub">All favourites</h3>
+
+      <label class="field">
+        <span>Arrive at the stop early by (min)</span>
+        <input id="buffer" type="number" min="0" max="30" inputmode="numeric">
+      </label>
+
+      <label class="opt">
+        <input id="showMap" type="checkbox">
+        <span>Show line map (1 extra request per refresh)</span>
+      </label>
+
+      <label class="field">
+        <span>API key (optional, raises the 100 requests/day limit)</span>
+        <input id="apiKey" type="text" autocomplete="off" placeholder="from the Belgian Mobility developer portal">
+      </label>
+
+      <div class="actions">
+        <button value="cancel" formnovalidate class="secondary">Cancel</button>
+        <button id="saveBtn" value="save" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="linemap.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
