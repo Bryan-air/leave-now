@@ -51,10 +51,11 @@ function saveConfig() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* private mode */ }
 }
 
-async function api(path, where, limit = 100) {
+async function api(path, where, limit = 100, params = {}) {
   const url = new URL(`${API}/${path}`);
   if (where) url.searchParams.set('where', where);
   url.searchParams.set('limit', String(limit));
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const headers = config.apiKey ? { [KEY_HEADER]: config.apiKey } : {};
   const res = await fetch(url, { headers, cache: 'no-store' });
   if (res.status === 429) throw new Error('Rate limit reached — add an API key in settings');
@@ -336,17 +337,13 @@ function openSettings(asNew = false) {
   if ($('settings').open) $('settings').querySelector('form').scrollTop = 0;
   else $('settings').showModal();
   $('settings').scrollTop = 0;
+  loadStopIndex().catch(() => {}); // ready by the time the user starts typing
   if (!editingNew && f.stopName) showCurrentStop(f);
 }
 
 // Editing an existing favourite: show its stop as picked and its lines with the saved ones ticked.
 async function showCurrentStop(f) {
-  const chip = document.createElement('button');
-  chip.type = 'button';
-  chip.className = 'chip';
-  chip.setAttribute('aria-pressed', 'true');
-  chip.textContent = titleCase(f.stopName);
-  $('stopResults').replaceChildren(chip);
+  $('stopQuery').value = titleCase(f.stopName);
   let ids = f.stopIds;
   if (!ids?.length) {
     // Favourites saved before stop ids were stored: look the stop's platforms up once.
@@ -393,8 +390,8 @@ async function searchStops() {
       b.className = 'chip';
       b.textContent = titleCase(s.label);
       b.onclick = () => {
-        box.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', 'false'));
-        b.setAttribute('aria-pressed', 'true');
+        $('stopQuery').value = titleCase(key);
+        box.innerHTML = '';
         pickStop(key, [...new Set(s.ids)], []);
       };
       box.appendChild(b);
@@ -422,6 +419,16 @@ async function pickStop(name, ids, selected = []) {
   for (const d of deps) {
     const k = `${d.pointId}|${d.line}`;
     if (!opts.has(k)) opts.set(k, { pointId: d.pointId, line: d.line, dest: d.dest });
+  }
+  // Every line and direction serving this stop (route index), so you can pick them even at night.
+  // Skip a route's last stop: you can't board towards a terminus you're already at.
+  if (stopIndex) {
+    for (const id of ids) {
+      for (const [line, dest] of stopIndex.served.get(id) || []) {
+        const k = `${id}|${line}`;
+        if (!opts.has(k)) opts.set(k, { pointId: id, line, dest, idle: !failed });
+      }
+    }
   }
   // Saved choices stay visible even when that line isn't running right now.
   for (const t of draftTargets) {
@@ -483,7 +490,7 @@ function deleteActive() {
   config.activeId = config.favorites[0]?.id ?? null;
   liveCache.delete(id);
   saveConfig();
-  $('settings').close();
+  closeSheet();
   applyCache(fav());
   render();
   if (fav().targets.length) refresh();
@@ -504,8 +511,22 @@ $('deleteFav').onclick = () => {
 $('openSettings').onclick = () => openSettings(false);
 $('addFav').onclick = () => openSettings(true);
 $('newFromSheet').onclick = () => openSettings(true); // re-open the same sheet in "new" mode
-$('searchBtn').onclick = searchStops;
-$('stopQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('stopQuery').blur(); searchStops(); } });
+$('stopQuery').addEventListener('input', renderSuggestions);
+$('stopQuery').addEventListener('focus', (e) => e.target.select());
+$('stopQuery').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  if (stopIndex) { const first = suggestStops(e.target.value)[0]; if (first) chooseStop(first); }
+  else searchStops(); // stop list unavailable: search online instead
+});
+$('stopQuery').addEventListener('blur', () => setTimeout(() => {
+  // Leaving the field without choosing: put the chosen stop's name back.
+  if (document.activeElement === $('stopQuery') || !draftStopName) return;
+  $('stopQuery').value = titleCase(draftStopName);
+  $('stopResults').innerHTML = '';
+}, 150));
+// Tapping a suggestion mustn't blur the field first (that would clear the list before the tap lands).
+$('stopResults').addEventListener('mousedown', (e) => { if (e.target.closest('.suggestion')) e.preventDefault(); });
 $('swipeArea').addEventListener('click', (e) => { if (e.target.closest('[data-action="add"]')) openSettings(true); });
 $('refresh').onclick = refresh;
 $('toMap').onclick = () => $('lineMap').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -530,7 +551,7 @@ $('settingsForm').addEventListener('submit', (e) => e.preventDefault());
 $('settingsForm').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('input:not(#stopQuery)')) { e.preventDefault(); e.target.blur(); }
 });
-$('cancelBtn').onclick = () => $('settings').close();
+$('cancelBtn').onclick = closeSheet;
 $('saveBtn').onclick = saveSettings;
 
 function saveSettings() {
@@ -559,9 +580,170 @@ function saveSettings() {
   config.apiKey = $('apiKey').value.trim();
   config.showMap = $('showMap').checked;
   saveConfig();
-  $('settings').close();
+  closeSheet();
   applyCache(fav());
   refresh();
+}
+
+/* ---------- Stop index: every stop + the lines serving it, downloaded once a week ----------
+   Autocomplete runs against this local copy, so typing costs no API requests (the anonymous
+   limit is ~100/day). 3 pages of StopDetails + 1 of stopsByLine ≈ 250 KB, stored compactly. */
+
+const STOP_INDEX_KEY = 'leaveNow.stopIndex.v1';
+const STOP_INDEX_TTL = 7 * 24 * 3600_000;
+let stopIndex = null; // { stops: [{ fr, nl, ids, lines, frKey, nlKey, words }], served: Map(pointId -> [[line, dest]]) }
+let stopIndexLoading = null;
+
+// Upper-case, no accents, punctuation as spaces: "Gare de l’Ouest" -> "GARE DE L OUEST".
+const fold = (s) => String(s || '').normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+
+function buildStopIndex(raw) {
+  const served = new Map(Object.entries(raw.served));
+  const byNum = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+  const stops = raw.stops.map((s) => {
+    const lines = [...new Set(s.ids.flatMap((id) => (served.get(id) || []).map(([line]) => line)))].sort(byNum);
+    const frKey = fold(s.fr), nlKey = fold(s.nl);
+    return { ...s, lines, frKey, nlKey, words: [...new Set(`${frKey} ${nlKey}`.split(' '))] };
+  });
+  return { stops, served };
+}
+
+async function downloadStopIndex() {
+  const rows = [];
+  for (let offset = 0; offset < 10_000; offset += 1000) {
+    const page = await api('static/StopDetails', '', 1000, { offset });
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  const byName = new Map();
+  for (const r of rows) {
+    const n = parse(r.name) || {};
+    const key = n.fr || n.nl;
+    if (!key) continue;
+    if (!byName.has(key)) byName.set(key, { fr: key, nl: n.nl && n.nl !== key ? n.nl : '', ids: [] });
+    const id = normId(r.id);
+    if (!byName.get(key).ids.includes(id)) byName.get(key).ids.push(id);
+  }
+  const served = {};
+  for (const v of await api('static/stopsByLine', '', 1000)) {
+    const dest = (parse(v.destination) || {}).fr || '';
+    const ids = (parse(v.points) || []).sort((a, b) => a.order - b.order).map((p) => normId(p.id));
+    ids.slice(0, -1).forEach((id) => {
+      const list = (served[id] ||= []);
+      if (!list.some(([l]) => l === v.lineid)) list.push([String(v.lineid), dest]);
+    });
+  }
+  return { stops: [...byName.values()], served };
+}
+
+function loadStopIndex() {
+  if (stopIndex) return Promise.resolve(stopIndex);
+  stopIndexLoading ||= (async () => {
+    let raw = cacheGet(STOP_INDEX_KEY, STOP_INDEX_TTL);
+    if (!raw) { raw = await downloadStopIndex(); cacheSet(STOP_INDEX_KEY, raw); }
+    return (stopIndex = buildStopIndex(raw));
+  })().catch((err) => { stopIndexLoading = null; throw err; });
+  return stopIndexLoading;
+}
+
+// Every typed word must start a word of the stop's FR or NL name; names starting with the query rank first.
+function suggestStops(text, max = 8) {
+  const q = fold(text);
+  if (!stopIndex || q.replace(/ /g, '').length < 2) return [];
+  const tokens = q.split(' ');
+  const hits = [];
+  for (const s of stopIndex.stops) {
+    let score;
+    if (tokens.every((t) => s.words.some((w) => w.startsWith(t)))) {
+      score = s.frKey.startsWith(q) ? 0 : s.nlKey.startsWith(q) ? 1 : 2;
+    } else if (s.frKey.includes(q) || s.nlKey.includes(q)) {
+      score = 3;
+    } else continue;
+    hits.push([score, s.frKey.length, s]);
+  }
+  return hits.sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, max).map((h) => h[2]);
+}
+
+function renderSuggestions() {
+  const box = $('stopResults');
+  const text = $('stopQuery').value;
+  if (fold(text).replace(/ /g, '').length < 2) { box.innerHTML = ''; return; }
+  if (!stopIndex) {
+    box.innerHTML = '<span class="hint">Loading the stop list…</span>';
+    loadStopIndex().then(renderSuggestions).catch((err) => {
+      box.innerHTML = `<span class="hint">${esc(err.message)} — press return to search online.</span>`;
+    });
+    return;
+  }
+  const list = suggestStops(text);
+  if (!list.length) { box.innerHTML = `<span class="hint">No stop matches “${esc(text.trim())}”</span>`; return; }
+  box.innerHTML = list.map((s, i) => `
+    <button type="button" class="suggestion" role="option" data-i="${i}">
+      <span class="sg-name">${esc(titleCase(s.fr))}${s.nl ? `<small>${esc(titleCase(s.nl))}</small>` : ''}</span>
+      <span class="sg-lines">${s.lines.slice(0, 5).map(badge).join('')}${s.lines.length > 5 ? `<i class="sg-more">+${s.lines.length - 5}</i>` : ''}</span>
+    </button>`).join('');
+  box.querySelectorAll('.suggestion').forEach((b) => (b.onclick = () => chooseStop(list[+b.dataset.i])));
+}
+
+// Picking a suggestion goes straight to the line selector.
+function chooseStop(s) {
+  $('stopQuery').value = titleCase(s.fr);
+  $('stopResults').innerHTML = '';
+  $('stopQuery').blur();
+  pickStop(s.fr, s.ids, []);
+  setTimeout(() => $('platforms').scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+}
+
+/* ---------- Settings sheet: tap outside, drag the handle down, or Esc to close ---------- */
+
+const sheet = $('settings');
+function closeSheet() {
+  if (!sheet.open || sheet.classList.contains('closing')) return;
+  sheet.classList.remove('dragging');
+  sheet.classList.add('closing');
+  sheet.style.transform = `translateY(${sheet.offsetHeight + 40}px)`;
+  setTimeout(() => {
+    sheet.close();
+    sheet.classList.remove('closing');
+    sheet.style.transform = '';
+  }, 260);
+}
+sheet.addEventListener('cancel', (e) => { e.preventDefault(); closeSheet(); }); // Esc key
+sheet.addEventListener('click', (e) => {
+  // Clicks on the dimmed backdrop are reported on the <dialog> itself, outside its box.
+  if (e.target !== sheet) return;
+  const r = sheet.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeSheet();
+});
+
+let sheetDrag = null;
+const grab = $('sheetGrab');
+grab.addEventListener('pointerdown', (e) => {
+  sheetDrag = { y: e.clientY, t: performance.now(), dy: 0 };
+  grab.setPointerCapture(e.pointerId);
+  sheet.classList.add('dragging');
+});
+grab.addEventListener('pointermove', (e) => {
+  if (!sheetDrag) return;
+  sheetDrag.dy = Math.max(0, e.clientY - sheetDrag.y); // follows the finger downwards only
+  sheet.style.transform = `translateY(${sheetDrag.dy}px)`;
+});
+function endSheetDrag() {
+  if (!sheetDrag) return;
+  const { dy, t } = sheetDrag;
+  sheetDrag = null;
+  sheet.classList.remove('dragging');
+  const speed = dy / Math.max(1, performance.now() - t); // px per ms
+  if (dy > 110 || (dy > 30 && speed > 0.5)) closeSheet(); // far enough, or a quick flick
+  else sheet.style.transform = ''; // spring back
+}
+grab.addEventListener('pointerup', endSheetDrag);
+grab.addEventListener('pointercancel', endSheetDrag);
+
+/* ---------- No zoom: the layout is built for the phone's width ----------
+   iOS Safari ignores user-scalable=no, so block its pinch gestures directly. */
+for (const type of ['gesturestart', 'gesturechange']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
 }
 
 /* ---------- Swipe / arrow keys to move between favourites ---------- */

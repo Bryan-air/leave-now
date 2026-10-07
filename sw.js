@@ -1,5 +1,5 @@
 // Caches the app shell so it opens instantly; live data always goes to the network.
-const CACHE = 'leave-now-v11';
+const CACHE = 'leave-now-v12';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'linemap.js', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {

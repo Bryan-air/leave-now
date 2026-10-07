@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <!-- Only this site's own files and the STIB open-data API may load; everything else is blocked. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api-management-discovery-production.azure-api.net; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Leave Now</title>
   <meta name="description" content="Live STIB departures and when to leave home">
   <meta name="theme-color" content="#0f151b">
@@ -91,7 +91,8 @@
 
   <dialog id="settings" class="glass">
     <form id="settingsForm" novalidate>
-      <div class="sheet-handle" aria-hidden="true"></div>
+      <!-- Drag this strip down to close the sheet (tapping outside also closes it). -->
+      <div class="sheet-grab" id="sheetGrab" aria-hidden="true"><div class="sheet-handle"></div></div>
       <div class="sheet-head">
         <h2 id="settingsTitle" tabindex="-1" autofocus>Edit favourite</h2>
         <button type="button" class="sheet-new" id="newFromSheet">
@@ -107,12 +108,9 @@
 
       <label class="field">
         <span>Stop</span>
-        <div class="row">
-          <input id="stopQuery" type="search" placeholder="e.g. Merode, Flagey…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-          <button type="button" id="searchBtn">Search</button>
-        </div>
+        <input id="stopQuery" type="search" placeholder="Start typing a stop, e.g. Merode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" role="combobox" aria-autocomplete="list" aria-controls="stopResults">
       </label>
-      <div id="stopResults" class="results"></div>
+      <div id="stopResults" class="suggest" role="listbox"></div>
       <div id="platforms" class="platforms"></div>
 
       <label class="field">
