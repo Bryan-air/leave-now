@@ -55,7 +55,8 @@ html, body { margin: 0; }
 body {
   background: linear-gradient(180deg, var(--bg-2), var(--bg) 60%) fixed;
   color: var(--text);
-  font: 15px/1.45 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* The device's own font (SF Pro on iPhone): no third-party font requests. */
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
   font-feature-settings: "tnum" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
   padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
@@ -480,3 +481,21 @@ dialog::backdrop { background: rgb(8 16 20 / .25); backdrop-filter: blur(3px); }
 }
 .sheet-new:active { transform: scale(.94); }
 .sheet-new[hidden] { display: none; }
+
+/* iPhone zooms the page when a field with text under 16px is focused, and in a Home Screen app
+   the zoom can stick (pushing the bottom bar off-screen). 16px prevents that. */
+input, select, textarea { font-size: 16px; }
+
+.hint-error { color: var(--now); font-weight: 600; }
+
+/* Empty state: the + becomes a labelled button, and the hero offers the same action */
+.fav-add-label { display: none; }
+.fav-add.labelled { width: auto; padding: 0 16px 0 12px; gap: 6px; }
+.fav-add.labelled .fav-add-label { display: inline; font-size: .875rem; }
+.hero-cta {
+  margin-top: 4px; padding: 10px 16px; border: 0; border-radius: 999px;
+  font-weight: 700; font-size: .9375rem; color: var(--bg); background: var(--text);
+  transition: transform .35s cubic-bezier(.3, 1.6, .5, 1);
+}
+.hero-cta:active { transform: scale(.94); }
+body[data-empty] .section-head, body[data-empty] .deps { display: none; }

@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- Only this site's own files and the STIB open-data API may load; everything else is blocked. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api-management-discovery-production.azure-api.net; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Leave Now</title>
   <meta name="description" content="Live STIB departures and when to leave home">
@@ -12,9 +14,6 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -43,6 +42,7 @@
       <!-- Kept outside the scrolling list so it's always reachable, however many favourites there are. -->
       <button type="button" class="fav fav-add" id="addFav" aria-label="Add a line setup">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="fav-add-label">Add a stop</span>
       </button>
     </div>
 
@@ -61,7 +61,7 @@
       <div class="hero-text">
         <div class="hero-label" id="heroLabel">Set up your stop</div>
         <div class="hero-title" id="heroTitle">Choose a station</div>
-        <div class="hero-detail" id="heroDetail">Tap the settings button to begin</div>
+        <div class="hero-detail" id="heroDetail"></div>
       </div>
     </section>
 
@@ -90,7 +90,7 @@
   </nav>
 
   <dialog id="settings" class="glass">
-    <form method="dialog" id="settingsForm">
+    <form id="settingsForm" novalidate>
       <div class="sheet-handle" aria-hidden="true"></div>
       <div class="sheet-head">
         <h2 id="settingsTitle" tabindex="-1" autofocus>Edit favourite</h2>
@@ -102,13 +102,13 @@
 
       <label class="field">
         <span>Name (optional)</span>
-        <input id="favName" type="text" maxlength="24" autocomplete="off" placeholder="e.g. Work, Gym, Mum's">
+        <input id="favName" type="text" maxlength="24" autocomplete="off" autocapitalize="words" enterkeyhint="done" placeholder="e.g. Work, Gym, Mum's">
       </label>
 
       <label class="field">
         <span>Stop</span>
         <div class="row">
-          <input id="stopQuery" type="search" placeholder="e.g. Merode, Flagey…" autocomplete="off">
+          <input id="stopQuery" type="search" placeholder="e.g. Merode, Flagey…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
           <button type="button" id="searchBtn">Search</button>
         </div>
       </label>
@@ -117,7 +117,7 @@
 
       <label class="field">
         <span>Walk from home to this stop (min)</span>
-        <input id="walk" type="number" min="0" max="60" inputmode="numeric">
+        <input id="walk" type="number" min="0" max="60" inputmode="numeric" enterkeyhint="done">
       </label>
 
       <button type="button" class="delete-row" id="deleteFav">Delete this line setup</button>
@@ -126,7 +126,7 @@
 
       <label class="field">
         <span>Arrive at the stop early by (min)</span>
-        <input id="buffer" type="number" min="0" max="30" inputmode="numeric">
+        <input id="buffer" type="number" min="0" max="30" inputmode="numeric" enterkeyhint="done">
       </label>
 
       <label class="opt">
@@ -136,12 +136,12 @@
 
       <label class="field">
         <span>API key (optional, raises the 100 requests/day limit)</span>
-        <input id="apiKey" type="text" autocomplete="off" placeholder="from the Belgian Mobility developer portal">
+        <input id="apiKey" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" placeholder="from the Belgian Mobility developer portal">
       </label>
 
       <div class="actions">
-        <button value="cancel" formnovalidate class="secondary">Cancel</button>
-        <button id="saveBtn" value="save" class="primary">Save</button>
+        <button type="button" id="cancelBtn" class="secondary">Cancel</button>
+        <button type="button" id="saveBtn" class="primary">Save</button>
       </div>
     </form>
   </dialog>

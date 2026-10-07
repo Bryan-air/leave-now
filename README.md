@@ -28,6 +28,13 @@ so flicking between them doesn't eat into the request limit. The arrive-early bu
   [developer portal](https://api-management-opendata-production.developer.azure-api.net/) and paste the key
   in Settings. The key header name is `KEY_HEADER` in `app.js`.
 
+## Privacy & security
+- No server, no accounts, no third-party scripts or fonts. The page only talks to the STIB open-data API.
+- A Content-Security-Policy (meta tag in `index.html`) blocks anything else from loading.
+- Favourites, walk times and the optional API key stay in your browser's local storage on your device.
+- Every GitHub Pages project under the same `<user>.github.io` shares that storage, so only publish
+  trusted code on the same account.
+
 ## Run locally
 ```
 python -m http.server 5178

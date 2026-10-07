@@ -163,7 +163,8 @@ function nextLeaveIn(f, now) {
 
 function renderFavs(now) {
   const box = $('favs');
-  $('favsRow').hidden = !config.favorites.length;
+  $('favsRow').hidden = false; // the + must always be reachable
+  $('addFav').classList.toggle('labelled', !config.favorites.length);
   const active = fav();
   const sig = config.favorites.map((f) => `${f.id}:${favLabel(f)}:${f.targets.length}:${f.id === active.id}`).join('|');
   if (box.dataset.sig !== sig) {
@@ -243,9 +244,10 @@ function render() {
   const list = $('deps');
   list.innerHTML = '';
   $('toMap').hidden = !config.showMap || !f.targets.length;
+  document.body.toggleAttribute('data-empty', !f.targets.length);
 
   if (!f.targets.length) {
-    setHero('', { label: 'Get started', title: 'Choose your station', detail: 'Tap the settings button above' });
+    setHero('', { label: 'Get started', title: 'Choose your stop', detail: '<button type="button" class="hero-cta" data-action="add">+ Add your first stop</button>' });
     setStatus('', 'Not set up');
     return;
   }
@@ -350,7 +352,7 @@ async function showCurrentStop(f) {
     // Favourites saved before stop ids were stored: look the stop's platforms up once.
     $('platforms').innerHTML = '<div class="hint">Loading your lines…</div>';
     try {
-      const name = f.stopName.toUpperCase().replace(/["%]/g, '');
+      const name = normalizeStopQuery(f.stopName);
       const rows = await api('static/StopDetails', `name like "%${name}%"`, 100);
       ids = rows.filter((r) => { const n = parse(r.name); return n.fr === f.stopName || n.nl === f.stopName; }).map((r) => normId(r.id));
     } catch { ids = []; }
@@ -361,9 +363,17 @@ async function showCurrentStop(f) {
   pickStop(f.stopName, ids, f.targets);
 }
 
+// STIB stop names are upper-case without accents ("TRINITE", "GARE DE L'OUEST", "UZ-VUB"), and the
+// API can't match apostrophes. Keep only letters/digits and let anything in between be a wildcard,
+// so "Trinité", "gare de l’ouest" or "uz vub" all match. This also leaves nothing that could alter the query.
+function normalizeStopQuery(s) {
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '%').replace(/^%+|%+$/g, '');
+}
+
 async function searchStops() {
-  const q = $('stopQuery').value.trim().toUpperCase().replace(/["%]/g, '');
-  if (q.length < 2) return;
+  const q = normalizeStopQuery($('stopQuery').value);
+  if (q.replace(/%/g, '').length < 2) return;
   const box = $('stopResults');
   box.innerHTML = '<span class="hint">Searching…</span>';
   try {
@@ -495,7 +505,8 @@ $('openSettings').onclick = () => openSettings(false);
 $('addFav').onclick = () => openSettings(true);
 $('newFromSheet').onclick = () => openSettings(true); // re-open the same sheet in "new" mode
 $('searchBtn').onclick = searchStops;
-$('stopQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchStops(); } });
+$('stopQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('stopQuery').blur(); searchStops(); } });
+$('swipeArea').addEventListener('click', (e) => { if (e.target.closest('[data-action="add"]')) openSettings(true); });
 $('refresh').onclick = refresh;
 $('toMap').onclick = () => $('lineMap').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -514,11 +525,19 @@ if (navigator.userAgentData?.brands?.some((b) => /Chromium/.test(b.brand))) {
   document.documentElement.classList.add('refract');
 }
 
-$('settingsForm').addEventListener('submit', (e) => {
-  if (e.submitter?.value !== 'save') return;
+// Pressing Go/return on the keyboard must never close the sheet (it used to trigger Cancel).
+$('settingsForm').addEventListener('submit', (e) => e.preventDefault());
+$('settingsForm').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('input:not(#stopQuery)')) { e.preventDefault(); e.target.blur(); }
+});
+$('cancelBtn').onclick = () => $('settings').close();
+$('saveBtn').onclick = saveSettings;
+
+function saveSettings() {
   if (!draftStopName || !draftTargets.length) {
-    e.preventDefault();
-    $('platforms').insertAdjacentHTML('afterbegin', `<div class="hint" style="color:var(--now)">${draftStopName ? 'Select at least one line.' : 'Search and pick a stop first.'}</div>`);
+    $('platforms').querySelector('.hint-error')?.remove();
+    $('platforms').insertAdjacentHTML('afterbegin', `<div class="hint hint-error">${draftStopName ? 'Select at least one line.' : 'Search for your stop and pick it first.'}</div>`);
+    ($('stopResults').firstChild ? $('platforms') : $('stopQuery')).scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
   const num = (id, fallback) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) && v >= 0 ? v : fallback; };
@@ -540,9 +559,10 @@ $('settingsForm').addEventListener('submit', (e) => {
   config.apiKey = $('apiKey').value.trim();
   config.showMap = $('showMap').checked;
   saveConfig();
+  $('settings').close();
   applyCache(fav());
   refresh();
-});
+}
 
 /* ---------- Swipe / arrow keys to move between favourites ---------- */
 
